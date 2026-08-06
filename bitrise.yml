@@ -1,0 +1,25 @@
+format_version: "11"
+default_step_lib_source: https://github.com/bitrise-io/bitrise-steplib.git
+
+workflows:
+  test_parse:
+    steps:
+    - script:
+        title: Run parse-secrets unit tests
+        inputs:
+        - content: |-
+            #!/usr/bin/env bash
+            set -ex
+            ./test/test-parse-secrets.sh
+
+  # Local development: path:: to this repo root after clone.
+  test_step_path:
+    steps:
+    - path::./:
+        title: Fetch AWS secrets (requires real AWS access)
+        inputs:
+        - account: "$AWS_SECRETS_ACCOUNT"
+        - role_name: "$AWS_SECRETS_ROLE_NAME"
+        - region: "$AWS_REGION"
+        - secrets: "$AWS_SECRETS_LINES"
+        - verbose: "true"

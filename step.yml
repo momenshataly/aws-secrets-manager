@@ -1,0 +1,159 @@
+---
+title: AWS Secrets Manager
+summary: Fetch secrets from AWS Secrets Manager and export them as environment variables.
+description: |-
+  Fetches secrets from AWS Secrets Manager and loads them into Environment Variables
+  for subsequent Steps.
+
+  ### Authentication
+
+  Supports three auth paths (checked in order):
+
+  1. **Ambient credentials** — if `AWS_ACCESS_KEY_ID` is already set (e.g. after
+     the Authenticate with AWS Step or exported static keys), the Step assumes
+     the secrets-account role via STS `AssumeRole`.
+  2. **OIDC** — if `audience` is set, fetches a Bitrise OIDC identity token and
+     assumes the secrets role via `AssumeRoleWithWebIdentity`.
+  3. **Access keys** — if `access_key_id` / `secret_access_key` inputs are set,
+     uses them then assumes the secrets role.
+
+  Prior AWS credentials are restored after secrets are exported so later Steps
+  (e.g. S3 upload) keep working.
+
+  ### Secret line format
+
+  - All keys: `PREFIX,secret-id` or `secret-id`
+  - Selective keys: `PREFIX,secret-id,key1|key2|key3`
+
+  See the Step README for examples.
+website: https://github.com/momenshataly/aws-secrets-manager
+source_code_url: https://github.com/momenshataly/aws-secrets-manager
+support_url: https://github.com/momenshataly/aws-secrets-manager/issues
+
+type_tags:
+- utility
+
+is_requires_admin_user: false
+is_always_run: false
+is_skippable: false
+
+toolkit:
+  bash:
+    entry_file: step.sh
+
+deps:
+  brew:
+  - name: jq
+  - name: awscli
+  apt_get:
+  - name: jq
+  - name: curl
+  - name: unzip
+
+inputs:
+- secrets:
+  opts:
+    title: Secrets
+    summary: List of secret IDs with optional env prefix and selective key list.
+    description: |-
+      One secret per line.
+
+      - Standard (all keys): `PREFIX,secret-id` or `secret-id`
+      - Selective keys: `PREFIX,secret-id,key1|key2|key3`
+
+      Secret-id must not contain a comma. Selective key names are pipe-separated.
+    is_required: true
+
+- account:
+  opts:
+    title: AWS account
+    summary: AWS account ID where secrets are stored.
+    description: |-
+      Numeric AWS account ID used to build the role ARN:
+      `arn:aws:iam::{account}:role/{role_name}`.
+    is_required: true
+
+- region: us-east-1
+  opts:
+    title: AWS region
+    summary: AWS region containing the secrets.
+
+- role_name:
+  opts:
+    title: IAM role name
+    summary: IAM role name to assume in the secrets account.
+    description: |-
+      Builds `arn:aws:iam::{account}:role/{role_name}`.
+
+      For Bitrise OIDC the role must trust `token.builds.bitrise.io`.
+    is_required: true
+
+- name_transformation: uppercase
+  opts:
+    title: Name transformation
+    summary: How to transform secret keys into environment variable names.
+    value_options:
+    - uppercase
+    - lowercase
+    - none
+
+- parse_json_secrets: "true"
+  opts:
+    title: Parse JSON secrets
+    summary: Create one env var per JSON key when the secret value is a JSON object.
+    value_options:
+    - "true"
+    - "false"
+
+- audience:
+  opts:
+    category: Authentication
+    title: OIDC token audience
+    summary: Audience for the Bitrise OIDC identity token (e.g. sts.amazonaws.com).
+    description: |-
+      Used when ambient AWS credentials are not present. Typical value:
+      `sts.amazonaws.com`.
+
+- access_key_id:
+  opts:
+    category: Authentication
+    title: AWS Access Key ID
+    summary: Static access key used when ambient AWS credentials and OIDC are unavailable.
+    is_sensitive: true
+
+- secret_access_key:
+  opts:
+    category: Authentication
+    title: AWS Secret Access Key
+    summary: Static secret access key paired with access_key_id.
+    is_sensitive: true
+
+- session_name: bitrise-$BITRISE_BUILD_NUMBER
+  opts:
+    category: Authentication
+    title: AWS session name
+    summary: Session name for the assumed role.
+
+- build_url: $BITRISE_BUILD_URL
+  opts:
+    category: Debug
+    title: Bitrise build URL
+    summary: Unique build URL used to fetch the OIDC identity token.
+    is_dont_change_value: true
+
+- build_api_token: $BITRISE_BUILD_API_TOKEN
+  opts:
+    category: Debug
+    title: Bitrise build API token
+    summary: Build API token used to fetch the OIDC identity token.
+    is_sensitive: true
+    is_dont_change_value: true
+
+- verbose: "false"
+  opts:
+    category: Debug
+    title: Enable verbose logging
+    summary: Enable additional debug logging (never logs secret values).
+    value_options:
+    - "true"
+    - "false"

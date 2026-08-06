@@ -1,0 +1,11 @@
+# Ignore local / editor noise
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+
+# Local env / credentials
+.env
+.env.*
+*.pem
