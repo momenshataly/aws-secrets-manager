@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Auth helpers: save/restore AWS credentials and assume the secrets-account role.
+# Auth helpers: save/restore AWS credentials and optionally assume a role.
 # shellcheck disable=SC2034
 
 set -euo pipefail
@@ -16,7 +16,7 @@ resolve_account_number() {
     local account="${account:-}"
 
     if [ -z "$account" ]; then
-        log_error "Input 'account' is required (AWS account ID)."
+        log_error "Input 'account' is required when assuming a role."
         return 1
     fi
 
@@ -28,11 +28,33 @@ secrets_role_arn() {
     local role="${role_name:-}"
 
     if [ -z "$role" ]; then
-        log_error "Input 'role_name' is required."
+        log_error "Input 'role_name' is required when assuming a role."
         return 1
     fi
 
     printf 'arn:aws:iam::%s:role/%s' "$account_number" "$role"
+}
+
+# True when both account and role_name are set (AssumeRole / OIDC assume path).
+should_assume_role() {
+    [ -n "${account:-}" ] && [ -n "${role_name:-}" ]
+}
+
+apply_region() {
+    # Prefer explicit step input; else keep ambient AWS_REGION from authenticate-with-aws;
+    # else default to us-east-1.
+    if [ -n "${region:-}" ]; then
+        export AWS_REGION="$region"
+        export AWS_DEFAULT_REGION="$region"
+    elif [ -n "${AWS_REGION:-}" ]; then
+        export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-$AWS_REGION}"
+    elif [ -n "${AWS_DEFAULT_REGION:-}" ]; then
+        export AWS_REGION="$AWS_DEFAULT_REGION"
+    else
+        export AWS_REGION="us-east-1"
+        export AWS_DEFAULT_REGION="us-east-1"
+    fi
+    log_debug "AWS_REGION=${AWS_REGION:-} AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-}"
 }
 
 save_aws_credentials() {
@@ -42,6 +64,7 @@ save_aws_credentials() {
     SAVED_AWS_REGION="${AWS_REGION:-}"
     SAVED_AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-}"
     HAD_AMBIENT_AWS_CREDS="false"
+    DID_ASSUME_ROLE="false"
     if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
         HAD_AMBIENT_AWS_CREDS="true"
     fi
@@ -77,6 +100,7 @@ assume_role_with_credentials() {
         return 1
     }
 
+    DID_ASSUME_ROLE="true"
     export_temp_aws_credentials \
         "$(printf '%s' "$response" | jq -r '.Credentials.AccessKeyId')" \
         "$(printf '%s' "$response" | jq -r '.Credentials.SecretAccessKey')" \
@@ -130,6 +154,7 @@ assume_role_with_oidc() {
         return 1
     }
 
+    DID_ASSUME_ROLE="true"
     export_temp_aws_credentials \
         "$(printf '%s' "$response" | jq -r '.Credentials.AccessKeyId')" \
         "$(printf '%s' "$response" | jq -r '.Credentials.SecretAccessKey')" \
@@ -139,37 +164,66 @@ assume_role_with_oidc() {
 authenticate_for_secrets() {
     local account_number role_arn
 
-    account_number=$(resolve_account_number) || return 1
-    role_arn=$(secrets_role_arn "$account_number")
-    log_info "Secrets account=${account_number} role=${role_arn}"
+    apply_region
 
-    export AWS_REGION="${region:-us-east-1}"
-    export AWS_DEFAULT_REGION="${region:-us-east-1}"
-
-    if [ "${HAD_AMBIENT_AWS_CREDS}" = "true" ]; then
-        assume_role_with_credentials "$role_arn" || return 1
-        return 0
+    # Partial assume inputs are invalid — require both or neither.
+    if { [ -n "${account:-}" ] && [ -z "${role_name:-}" ]; } || \
+       { [ -z "${account:-}" ] && [ -n "${role_name:-}" ]; }; then
+        log_error "To assume a role, pass both 'account' and 'role_name' (or omit both to use ambient AWS credentials)."
+        return 1
     fi
 
-    if [ -n "${audience:-}" ]; then
-        assume_role_with_oidc "$role_arn" "$audience" || return 1
+    if should_assume_role; then
+        account_number=$(resolve_account_number) || return 1
+        role_arn=$(secrets_role_arn "$account_number")
+        log_info "Will assume role account=${account_number} role=${role_arn}"
+
+        if [ "${HAD_AMBIENT_AWS_CREDS}" = "true" ]; then
+            assume_role_with_credentials "$role_arn" || return 1
+            return 0
+        fi
+
+        if [ -n "${audience:-}" ]; then
+            assume_role_with_oidc "$role_arn" "$audience" || return 1
+            return 0
+        fi
+
+        if [ -n "${access_key_id:-}" ] && [ -n "${secret_access_key:-}" ]; then
+            log_info "Using access key inputs, then assuming secrets role"
+            export_temp_aws_credentials "$access_key_id" "$secret_access_key" ""
+            assume_role_with_credentials "$role_arn" || return 1
+            return 0
+        fi
+
+        log_error "account/role_name were set but no credentials are available to assume the role."
+        log_error "Provide ambient AWS_* (e.g. authenticate-with-aws), audience for OIDC, or access_key_id/secret_access_key."
+        return 1
+    fi
+
+    # No account/role_name → use ambient credentials (typical after authenticate-with-aws).
+    if [ "${HAD_AMBIENT_AWS_CREDS}" = "true" ]; then
+        log_info "Using ambient AWS credentials (account/role_name omitted; skipping AssumeRole)"
         return 0
     fi
 
     if [ -n "${access_key_id:-}" ] && [ -n "${secret_access_key:-}" ]; then
-        log_info "Using access key inputs, then assuming secrets role"
+        log_info "Using access key inputs (no role assume)"
         export_temp_aws_credentials "$access_key_id" "$secret_access_key" ""
-        assume_role_with_credentials "$role_arn" || return 1
         return 0
     fi
 
     log_error "No AWS credentials available."
-    log_error "Provide ambient AWS_* (e.g. run authenticate-with-aws first), set audience for OIDC, or pass access_key_id/secret_access_key."
+    log_error "Run authenticate-with-aws first (omit account/role_name here), or pass account+role_name with audience/access keys."
     return 1
 }
 
-# Restore prior AWS credentials for subsequent Steps via envman.
+# Restore prior AWS credentials for subsequent Steps via envman (only if we assumed).
 restore_aws_credentials() {
+    if [ "${DID_ASSUME_ROLE:-false}" != "true" ]; then
+        log_info "No role assume performed; leaving AWS credentials unchanged for subsequent Steps"
+        return 0
+    fi
+
     if [ "${HAD_AMBIENT_AWS_CREDS}" = "true" ]; then
         log_info "Restoring prior AWS credentials for subsequent Steps"
         envman add --key AWS_ACCESS_KEY_ID --value "${SAVED_AWS_ACCESS_KEY_ID}" --sensitive
@@ -177,7 +231,6 @@ restore_aws_credentials() {
         if [ -n "${SAVED_AWS_SESSION_TOKEN}" ]; then
             envman add --key AWS_SESSION_TOKEN --value "${SAVED_AWS_SESSION_TOKEN}" --sensitive
         else
-            # Clear session token if prior creds had none (static keys).
             envman add --key AWS_SESSION_TOKEN --value ""
         fi
         if [ -n "${SAVED_AWS_REGION}" ]; then
@@ -187,9 +240,7 @@ restore_aws_credentials() {
             envman add --key AWS_DEFAULT_REGION --value "${SAVED_AWS_DEFAULT_REGION}"
         fi
     else
-        log_info "No prior AWS credentials to restore; clearing temporary secrets-role credentials from envman"
-        # Leave process-local exports; subsequent Steps won't inherit them unless envman set them.
-        # Ensure we don't accidentally persist secrets-role creds if we exported via envman earlier (we don't).
+        log_info "No prior AWS credentials to restore after assume"
         :
     fi
 }
