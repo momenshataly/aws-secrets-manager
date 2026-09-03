@@ -7,18 +7,20 @@ description: |-
 
   ### Authentication
 
-  Supports three auth paths (checked in order):
+  Supports these auth paths:
 
-  1. **Ambient credentials** — if `AWS_ACCESS_KEY_ID` is already set (e.g. after
-     the Authenticate with AWS Step or exported static keys), the Step assumes
-     the secrets-account role via STS `AssumeRole`.
-  2. **OIDC** — if `audience` is set, fetches a Bitrise OIDC identity token and
-     assumes the secrets role via `AssumeRoleWithWebIdentity`.
-  3. **Access keys** — if `access_key_id` / `secret_access_key` inputs are set,
-     uses them then assumes the secrets role.
+  1. **Ambient credentials only** — if `AWS_ACCESS_KEY_ID` is already set (e.g.
+     after Authenticate with AWS) and `account`/`role_name` are omitted, the Step
+     uses those credentials as-is (no second AssumeRole).
+  2. **Ambient + AssumeRole** — if ambient `AWS_*` exist and both `account` and
+     `role_name` are set, assumes that role via STS `AssumeRole`.
+  3. **OIDC** — if no ambient creds, `audience` is set, and both `account` and
+     `role_name` are set → Bitrise OIDC + `AssumeRoleWithWebIdentity`.
+  4. **Access keys** — static keys, optionally followed by AssumeRole when
+     `account`/`role_name` are set.
 
-  Prior AWS credentials are restored after secrets are exported so later Steps
-  (e.g. S3 upload) keep working.
+  When a role was assumed, prior AWS credentials are restored after secrets are
+  exported so later Steps (e.g. S3 upload) keep working.
 
   ### Secret line format
 
@@ -67,26 +69,37 @@ inputs:
 - account:
   opts:
     title: AWS account
-    summary: AWS account ID where secrets are stored.
+    summary: AWS account ID for optional role assume (with role_name).
     description: |-
       Numeric AWS account ID used to build the role ARN:
       `arn:aws:iam::{account}:role/{role_name}`.
-    is_required: true
 
-- region: us-east-1
+      Optional. Omit together with `role_name` to use ambient AWS credentials
+      (e.g. after Authenticate with AWS). Required together with `role_name`
+      when this Step should assume a role.
+    is_required: false
+
+- region:
   opts:
     title: AWS region
-    summary: AWS region containing the secrets.
+    summary: AWS region containing the secrets (optional).
+    description: |-
+      If set, exported as `AWS_REGION` / `AWS_DEFAULT_REGION`.
+      If omitted, keeps ambient region from Authenticate with AWS, otherwise
+      defaults to `us-east-1`.
 
 - role_name:
   opts:
     title: IAM role name
-    summary: IAM role name to assume in the secrets account.
+    summary: IAM role to assume (optional; pair with account).
     description: |-
       Builds `arn:aws:iam::{account}:role/{role_name}`.
 
+      Optional. Omit together with `account` to use ambient AWS credentials.
+      Required together with `account` when assuming a role.
+
       For Bitrise OIDC the role must trust `token.builds.bitrise.io`.
-    is_required: true
+    is_required: false
 
 - name_transformation: uppercase
   opts:
