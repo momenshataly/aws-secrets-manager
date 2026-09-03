@@ -14,7 +14,7 @@ Authenticate once, then fetch secrets **without** re-assuming the same role.
 Omit `account` / `role_name` so ambient `AWS_*` from the previous Step are used as-is.
 
 ```yaml
-- authenticate-with-aws@1:
+- authenticate-with-aws@0.0.1:
     inputs:
     - region: eu-west-1
     - audience: sts.amazonaws.com
