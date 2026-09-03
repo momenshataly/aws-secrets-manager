@@ -28,14 +28,6 @@ main() {
         log_error "Input 'secrets' is required."
         exit 1
     fi
-    if [ -z "${account:-}" ]; then
-        log_error "Input 'account' is required."
-        exit 1
-    fi
-    if [ -z "${role_name:-}" ]; then
-        log_error "Input 'role_name' is required."
-        exit 1
-    fi
 
     TMPDIR_STEP=$(mktemp -d)
     trap 'rm -rf "$TMPDIR_STEP"' EXIT
