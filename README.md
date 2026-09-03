@@ -18,7 +18,7 @@ Omit `account` / `role_name` so ambient `AWS_*` from the previous Step are used 
     inputs:
     - region: eu-west-1
     - audience: sts.amazonaws.com
-    - role_arn: arn:aws:iam::123456789012:role/my-bitrise-role
+    - role_arn: arn:aws:iam::123456789012:role/my-bitrise-bootstrap-role
 - git::https://github.com/momenshataly/aws-secrets-manager.git@main:
     title: Fetch AWS secrets
     inputs:
@@ -33,7 +33,7 @@ Pass **both** `account` and `role_name` to call STS `AssumeRole` into that role.
 The bootstrap role must be allowed to assume the secrets role.
 
 ```yaml
-- authenticate-with-aws@1:
+- authenticate-with-aws@0.0.1:
     inputs:
     - region: us-east-1
     - audience: sts.amazonaws.com
