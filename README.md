@@ -18,7 +18,7 @@ Omit `account` / `role_name` so ambient `AWS_*` from the previous Step are used 
     inputs:
     - region: eu-west-1
     - audience: sts.amazonaws.com
-    - role_arn: arn:aws:iam::123456789012:role/ios-bitrise
+    - role_arn: arn:aws:iam::123456789012:role/my-bitrise-role
 - git::https://github.com/momenshataly/aws-secrets-manager.git@main:
     title: Fetch AWS secrets
     inputs:
