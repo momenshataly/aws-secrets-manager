@@ -22,10 +22,14 @@ Omit `account` / `role_name` so ambient `AWS_*` from the previous Step are used 
 - git::https://github.com/momenshataly/aws-secrets-manager.git@main:
     title: Fetch AWS secrets
     inputs:
+    - region: eu-west-1
     - secrets: |
         APP,my-app/config
         ,my-app/config,API_TOKEN
 ```
+
+`region` must be repeated here: Authenticate with AWS keeps its own `region`
+input to itself and never exports `AWS_REGION`.
 
 ### Assume a (different) secrets role after Authenticate with AWS
 
@@ -41,6 +45,7 @@ The bootstrap role must be allowed to assume the secrets role.
 - git::https://github.com/momenshataly/aws-secrets-manager.git@main:
     inputs:
     - account: "123456789012"
+    - region: us-east-1
     - role_name: my-secrets-readonly-role
     - secrets: |
         APP,my-app/config,API_TOKEN|DB_PASSWORD
@@ -55,6 +60,7 @@ Prior `AWS_*` credentials are restored after secrets are exported when a role wa
     inputs:
     - account: "123456789012"
     - audience: sts.amazonaws.com
+    - region: eu-west-1
     - role_name: my-secrets-readonly-role
     - secrets: |
         APP,my-app/config
@@ -70,7 +76,7 @@ Pin a tag or commit SHA instead of `main` for reproducible builds.
 | --- | --- | --- |
 | `secrets` | _(required)_ | Secret lines (see format below) |
 | `account` | empty | AWS account ID — required **with** `role_name` to assume a role; omit both to use ambient `AWS_*` |
-| `region` | empty | AWS region; else keeps ambient region; else `us-east-1` |
+| `region` | _(required)_ | AWS region holding the secrets, e.g. `eu-west-1`. No fallback — Authenticate with AWS does not export its region |
 | `role_name` | empty | IAM role name — required **with** `account` to assume; omit both for ambient creds |
 | `name_transformation` | `uppercase` | `uppercase` / `lowercase` / `none` |
 | `parse_json_secrets` | `true` | One env var per JSON key |

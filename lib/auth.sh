@@ -41,20 +41,17 @@ should_assume_role() {
 }
 
 apply_region() {
-    # Prefer explicit step input; else keep ambient AWS_REGION from authenticate-with-aws;
-    # else default to us-east-1.
-    if [ -n "${region:-}" ]; then
-        export AWS_REGION="$region"
-        export AWS_DEFAULT_REGION="$region"
-    elif [ -n "${AWS_REGION:-}" ]; then
-        export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-$AWS_REGION}"
-    elif [ -n "${AWS_DEFAULT_REGION:-}" ]; then
-        export AWS_REGION="$AWS_DEFAULT_REGION"
-    else
-        export AWS_REGION="us-east-1"
-        export AWS_DEFAULT_REGION="us-east-1"
+    # No fallback: an implicit region silently targets the wrong endpoint and
+    # surfaces as AccessDenied when IAM policies are scoped per region.
+    if [ -z "${region:-}" ]; then
+        log_error "Input 'region' is required (e.g. eu-west-1)."
+        log_error "authenticate-with-aws does not export AWS_REGION, so it must be set explicitly here."
+        return 1
     fi
-    log_debug "AWS_REGION=${AWS_REGION:-} AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-}"
+
+    export AWS_REGION="$region"
+    export AWS_DEFAULT_REGION="$region"
+    log_debug "AWS_REGION=${AWS_REGION} AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}"
 }
 
 save_aws_credentials() {
@@ -86,6 +83,25 @@ export_temp_aws_credentials() {
     fi
 }
 
+current_caller_arn() {
+    aws sts get-caller-identity --query Arn --output text 2>/dev/null || true
+}
+
+# Ambient credentials already are the target role (e.g. authenticate-with-aws
+# assumed it). A role cannot re-assume itself unless it is its own trusted
+# principal, so AssumeRole would fail with AccessDenied.
+already_assumed_target_role() {
+    local role="$1"
+    local caller
+    caller=$(current_caller_arn)
+    [ -n "$caller" ] || return 1
+    log_debug "Caller identity: ${caller}"
+    case "$caller" in
+        *":assumed-role/${role}/"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 assume_role_with_credentials() {
     local role_arn="$1"
     local session="${session_name:-bitrise-${BITRISE_BUILD_NUMBER:-local}}"
@@ -97,6 +113,7 @@ assume_role_with_credentials() {
         --role-session-name "$session" \
         --output json) || {
         log_error "Failed to assume role: ${role_arn}"
+        log_error "The current identity ($(current_caller_arn)) must be a trusted principal of that role."
         return 1
     }
 
@@ -164,7 +181,7 @@ assume_role_with_oidc() {
 authenticate_for_secrets() {
     local account_number role_arn
 
-    apply_region
+    apply_region || return 1
 
     # Partial assume inputs are invalid — require both or neither.
     if { [ -n "${account:-}" ] && [ -z "${role_name:-}" ]; } || \
@@ -179,6 +196,10 @@ authenticate_for_secrets() {
         log_info "Will assume role account=${account_number} role=${role_arn}"
 
         if [ "${HAD_AMBIENT_AWS_CREDS}" = "true" ]; then
+            if already_assumed_target_role "${role_name}"; then
+                log_info "Ambient credentials already are ${role_name}; skipping AssumeRole"
+                return 0
+            fi
             assume_role_with_credentials "$role_arn" || return 1
             return 0
         fi
