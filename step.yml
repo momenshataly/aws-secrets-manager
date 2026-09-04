@@ -154,14 +154,14 @@ inputs:
 
 - build_url: $BITRISE_BUILD_URL
   opts:
-    category: Debug
+    category: Authentication
     title: Bitrise build URL
     summary: Unique build URL used to fetch the OIDC identity token.
     is_dont_change_value: true
 
 - build_api_token: $BITRISE_BUILD_API_TOKEN
   opts:
-    category: Debug
+    category: Authentication
     title: Bitrise build API token
     summary: Build API token used to fetch the OIDC identity token.
     is_sensitive: true
