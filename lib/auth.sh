@@ -173,8 +173,7 @@ assume_role_with_oidc() {
     fi
     if ! looks_like_jwt "${BITRISE_OIDC_ID_TOKEN}"; then
         log_error "Fetched OIDC token is not a JWT (expected three dot-separated segments)."
-        log_error "STS rejects this as InvalidIdentityToken. Enable verbose to inspect its shape."
-        log_debug "Token length=${#BITRISE_OIDC_ID_TOKEN} first_chars=${BITRISE_OIDC_ID_TOKEN:0:8}"
+        log_error "STS would reject this as InvalidIdentityToken."
         return 1
     fi
 
