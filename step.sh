@@ -29,6 +29,11 @@ main() {
         exit 1
     fi
 
+    if [ -z "${region:-}" ]; then
+        log_error "Input 'region' is required (e.g. eu-west-1)."
+        exit 1
+    fi
+
     TMPDIR_STEP=$(mktemp -d)
     trap 'rm -rf "$TMPDIR_STEP"' EXIT
     export TMPDIR_STEP

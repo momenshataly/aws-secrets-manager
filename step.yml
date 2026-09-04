@@ -13,7 +13,8 @@ description: |-
      after Authenticate with AWS) and `account`/`role_name` are omitted, the Step
      uses those credentials as-is (no second AssumeRole).
   2. **Ambient + AssumeRole** — if ambient `AWS_*` exist and both `account` and
-     `role_name` are set, assumes that role via STS `AssumeRole`.
+     `role_name` are set, assumes that role via STS `AssumeRole`. If the ambient
+     credentials already are that role, the assume is skipped.
   3. **OIDC** — if no ambient creds, `audience` is set, and both `account` and
      `role_name` are set → Bitrise OIDC + `AssumeRoleWithWebIdentity`.
   4. **Access keys** — static keys, optionally followed by AssumeRole when
@@ -82,11 +83,15 @@ inputs:
 - region:
   opts:
     title: AWS region
-    summary: AWS region containing the secrets (optional).
+    summary: AWS region containing the secrets.
     description: |-
-      If set, exported as `AWS_REGION` / `AWS_DEFAULT_REGION`.
-      If omitted, keeps ambient region from Authenticate with AWS, otherwise
-      defaults to `us-east-1`.
+      Exported as `AWS_REGION` / `AWS_DEFAULT_REGION`, e.g. `eu-west-1`.
+
+      Required, with no fallback: Authenticate with AWS does not export the
+      region it authenticated in, and an implicit region targets a different
+      endpoint, which IAM policies scoped per region reject as
+      `AccessDeniedException` on `GetSecretValue`.
+    is_required: true
 
 - role_name:
   opts:
