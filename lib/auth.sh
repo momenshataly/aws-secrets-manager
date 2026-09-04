@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+# Declared up front so `set -u` cannot trip on it before a fetch runs.
+BITRISE_OIDC_ID_TOKEN=""
+
 log_info() { echo "ℹ️  $*"; }
 log_error() { echo "❌ $*" >&2; }
 log_debug() {
@@ -124,11 +127,20 @@ assume_role_with_credentials() {
         "$(printf '%s' "$response" | jq -r '.Credentials.SessionToken')"
 }
 
+looks_like_jwt() {
+    [[ "$1" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]]
+}
+
+# Result is published in BITRISE_OIDC_ID_TOKEN rather than written to stdout:
+# the log helpers also write to stdout, so a caller using command substitution
+# would capture log lines together with the token and send that to STS.
 fetch_bitrise_oidc_token() {
     local aud="$1"
     local url="${build_url:-${BITRISE_BUILD_URL:-}}"
     local token="${build_api_token:-${BITRISE_BUILD_API_TOKEN:-}}"
     local response
+
+    BITRISE_OIDC_ID_TOKEN=""
 
     if [ -z "$url" ] || [ -z "$token" ]; then
         log_error "OIDC auth requires build_url and build_api_token (Bitrise build context)."
@@ -145,19 +157,24 @@ fetch_bitrise_oidc_token() {
         return 1
     }
 
-    printf '%s' "$response" | jq -r '.id_token'
+    BITRISE_OIDC_ID_TOKEN=$(printf '%s' "$response" | jq -r '.id_token // empty')
 }
 
 assume_role_with_oidc() {
     local role_arn="$1"
     local aud="$2"
     local session="${session_name:-bitrise-${BITRISE_BUILD_NUMBER:-local}}"
-    local identity_token
     local response
 
-    identity_token=$(fetch_bitrise_oidc_token "$aud") || return 1
-    if [ -z "$identity_token" ] || [ "$identity_token" = "null" ]; then
-        log_error "OIDC identity token response was empty."
+    fetch_bitrise_oidc_token "$aud" || return 1
+    if [ -z "${BITRISE_OIDC_ID_TOKEN}" ]; then
+        log_error "Bitrise OIDC response contained no 'id_token'."
+        return 1
+    fi
+    if ! looks_like_jwt "${BITRISE_OIDC_ID_TOKEN}"; then
+        log_error "Fetched OIDC token is not a JWT (expected three dot-separated segments)."
+        log_error "STS rejects this as InvalidIdentityToken. Enable verbose to inspect its shape."
+        log_debug "Token length=${#BITRISE_OIDC_ID_TOKEN} first_chars=${BITRISE_OIDC_ID_TOKEN:0:8}"
         return 1
     fi
 
@@ -165,11 +182,13 @@ assume_role_with_oidc() {
     response=$(aws sts assume-role-with-web-identity \
         --role-arn "$role_arn" \
         --role-session-name "$session" \
-        --web-identity-token "$identity_token" \
+        --web-identity-token "${BITRISE_OIDC_ID_TOKEN}" \
         --output json) || {
         log_error "Failed to assume role with web identity: ${role_arn}"
+        BITRISE_OIDC_ID_TOKEN=""
         return 1
     }
+    BITRISE_OIDC_ID_TOKEN=""
 
     DID_ASSUME_ROLE="true"
     export_temp_aws_credentials \

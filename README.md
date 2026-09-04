@@ -125,8 +125,11 @@ Selective mode fails if a listed key is missing from the secret JSON (strict).
 
 Declared as `deps` in `step.yml` for brew/apt where applicable.
 
-## Local parse test
+## Local tests
+
+No AWS access needed; `aws` and `curl` are stubbed.
 
 ```bash
 ./test/test-parse-secrets.sh
+./test/test-auth.sh
 ```
